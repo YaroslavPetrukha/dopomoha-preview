@@ -63,6 +63,112 @@
     });
   }
 
+  /* ---------- Consult dialog «Безкоштовна консультація» ----------
+     Opens from any [data-consult] link (href stays as the no-JS fallback).
+     Native showModal() = top layer + inert page; we add: Tab trap, Esc/backdrop/close button,
+     body scroll lock without jump (same technique as the menu), focus return, service preselect,
+     visualViewport sizing so the sheet and its submit stay above the on-screen keyboard. */
+  var dlg = document.getElementById('consult');
+  if (dlg && typeof dlg.showModal === 'function') {
+    var dForm = dlg.querySelector('form');
+    var dTitle = dlg.querySelector('#consult-title');
+    var svcBox = dlg.querySelector('.consult__service');
+    var svcName = dlg.querySelector('.consult__service-name');
+    var svcInput = dlg.querySelector('input[name="service"]');
+    var dSelect = dlg.querySelector('select[name="practice"]');
+    var opener = null, dLockY = 0;
+    var root = document.documentElement;
+
+    function focusables() {
+      return Array.prototype.filter.call(dlg.querySelectorAll('a[href], button, input:not([type="hidden"]), select, textarea, [tabindex]:not([tabindex="-1"])'), function (el) {
+        return !el.disabled && el.offsetParent !== null;
+      });
+    }
+    function setService(name) {
+      svcInput.value = name || '';
+      svcName.textContent = name || '';
+      svcName.title = name || '';
+      svcBox.hidden = !name;
+    }
+    function fitViewport() {
+      var vv = window.visualViewport; if (!vv) return;
+      dlg.style.setProperty('--vvh', vv.height + 'px');
+      var kb = Math.max(0, window.innerHeight - (vv.height + vv.offsetTop));
+      dlg.style.setProperty('--kb', kb + 'px');
+    }
+    function resetScroll() {
+      dlg.scrollTop = 0;
+      var a = dlg.querySelector('.consult__scroll'), b = dlg.querySelector('.consult__body');
+      if (a) a.scrollTop = 0;
+      if (b) b.scrollTop = 0;
+    }
+    function openDialog(from) {
+      if (dlg.open) return;
+      opener = from || document.activeElement;
+      setService(from && from.getAttribute('data-service'));
+      var pr = from && from.getAttribute('data-practice');
+      if (dSelect) dSelect.value = pr && dSelect.querySelector('option[value="' + pr + '"]') ? pr : '';
+      var st = dlg.querySelector('[role="status"]'); if (st) st.textContent = '';
+      clearErr(dForm);
+      var sbw = window.innerWidth - root.clientWidth;
+      dLockY = window.pageYOffset;
+      root.style.setProperty('--sbw', sbw + 'px');
+      document.body.style.top = (-dLockY) + 'px';
+      root.classList.add('modal-open');
+      fitViewport();
+      dlg.showModal();
+      resetScroll();
+      /* desktop: straight to the first field; touch: the title (no keyboard pops up over the sheet) */
+      if (window.matchMedia('(pointer: fine)').matches) dlg.querySelector('#m-name').focus({ preventScroll: true });
+      else dTitle.focus({ preventScroll: true });
+      resetScroll();
+    }
+    function closeDialog() {
+      if (!dlg.open) return;
+      dlg.close();
+      root.classList.remove('modal-open');
+      document.body.style.top = '';
+      root.style.removeProperty('--sbw');
+      window.scrollTo({ top: dLockY, left: 0, behavior: 'instant' });
+      var back = opener && opener.offsetParent !== null ? opener : (btn && btn.offsetParent !== null ? btn : null);
+      if (back) back.focus({ preventScroll: true });
+    }
+    document.addEventListener('click', function (e) {
+      var a = e.target.closest && e.target.closest('[data-consult]');
+      if (!a || e.defaultPrevented || e.metaKey || e.ctrlKey || e.shiftKey || e.button > 0) return;
+      e.preventDefault();
+      /* opened from the burger menu: the menu closes first (its own click handler), then the dialog opens */
+      openDialog(a);
+    });
+    dlg.querySelector('.consult__close').addEventListener('click', closeDialog);
+    dlg.querySelector('.consult__service-clear').addEventListener('click', function () {
+      setService(''); if (dSelect) dSelect.focus();
+    });
+    dlg.addEventListener('cancel', function (e) { e.preventDefault(); closeDialog(); }); /* Esc */
+    dlg.addEventListener('click', function (e) { /* backdrop: click lands on <dialog> itself, outside its box */
+      if (e.target !== dlg) return;
+      var r = dlg.getBoundingClientRect();
+      if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) closeDialog();
+    });
+    dlg.addEventListener('keydown', function (e) {
+      if (e.key !== 'Tab') return;
+      var f = focusables(); if (!f.length) return;
+      var i = f.indexOf(document.activeElement);
+      if (i === -1) { e.preventDefault(); f[e.shiftKey ? f.length - 1 : 0].focus(); }
+      else if (e.shiftKey && i === 0) { e.preventDefault(); f[f.length - 1].focus(); }
+      else if (!e.shiftKey && i === f.length - 1) { e.preventDefault(); f[0].focus(); }
+    });
+    /* keep the focused field visible inside the scrolling sheet body */
+    dlg.addEventListener('focusin', function (e) {
+      if (!e.target.matches('input, select, textarea')) return;
+      setTimeout(function () { e.target.scrollIntoView({ block: 'nearest' }); }, 250);
+    });
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', function () { if (dlg.open) fitViewport(); });
+      window.visualViewport.addEventListener('scroll', function () { if (dlg.open) fitViewport(); });
+    }
+  }
+
   if (/[?&]draft(=|&|$)/.test(location.search)) {
     document.documentElement.classList.add('draft-mode');
     var note = document.createElement('div');
@@ -75,6 +181,7 @@
   var bar = document.querySelector('.mobile-bar');
   document.addEventListener('focusin', function (e) {
     var el = e.target;
+    if (el.closest && el.closest('dialog')) return;
     if (!bar || !el.form || bar.offsetParent === null && getComputedStyle(bar).display === 'none') return;
     var limit = window.innerHeight - bar.offsetHeight - 16;
     var r = el.getBoundingClientRect();
